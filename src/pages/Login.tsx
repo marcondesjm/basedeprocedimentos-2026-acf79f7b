@@ -15,368 +15,177 @@ const BUILD_TIMESTAMP = String(__BUILD_TIMESTAMP__);
 
 const MatrixBackground = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const shipRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     let animationId: number;
-    let time = 0;
-    let mouseX = -1000;
-    let mouseY = -1000;
-
-    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', resize);
     resize();
-    window.addEventListener("resize", resize);
 
-    const onMouseMove = (e: MouseEvent) => { mouseX = e.clientX; mouseY = e.clientY; };
-    const onMouseLeave = () => { mouseX = -1000; mouseY = -1000; };
-    const onTouchMove = (e: TouchEvent) => { mouseX = e.touches[0].clientX; mouseY = e.touches[0].clientY; };
-    const onTouchEnd = () => { mouseX = -1000; mouseY = -1000; };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseleave", onMouseLeave);
-    document.addEventListener("touchmove", onTouchMove);
-    document.addEventListener("touchend", onTouchEnd);
+    // Matrix effect setup
+    const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%\"'#&_(),.;:?!\\|{}[]<>@^~";
+    const fontSize = 14;
+    const columns = Math.ceil(canvas.width / fontSize);
+    let drops: number[] = new Array(columns).fill(1).map(() => Math.random() * -100);
 
-    const fontSize = 13;
-    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン";
-    let columns = Math.floor(canvas.width / fontSize);
-    let drops: number[] = new Array(columns).fill(0).map(() => Math.random() * -80);
-    let speeds: number[] = new Array(columns).fill(0).map(() => 0.3 + Math.random() * 0.7);
-
-    const ship = { x: canvas.width / 2, y: canvas.height / 2, angle: 0, thrustAlpha: 0, invincible: 0 };
-    const lasers: { x: number; y: number; vx: number; vy: number; life: number }[] = [];
-    const enemies: { x: number; y: number; vx: number; vy: number; size: number; hp: number; maxHp: number; type: number; isBoss: boolean }[] = [];
-    const particles: { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number }[] = [];
-    const powerups: { x: number; y: number; ptype: number; life: number }[] = [];
-    const stars: { x: number; y: number; size: number; brightness: number; speed: number }[] = [];
-    const floatTexts: { x: number; y: number; text: string; life: number; color: string }[] = [];
-
-    let score = 0;
-    let highScore = Number(localStorage.getItem('game_highscore') || 0);
-    let lives = 3;
-    let level = 1;
-    let kills = 0;
-    let combo = 0;
-    let comboTimer = 0;
-    let lastShot = 0;
-    let autoShootTimer = 0;
-    let bossKillCount = 0;
-    let scanY = 0;
-    let shieldActive = 0;
-    let rapidActive = 0;
-    let tripleActive = 0;
-    let gameOver = false;
-
-    for (let i = 0; i < 120; i++) {
-      stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: 0.5 + Math.random() * 1.5, brightness: 0.3 + Math.random() * 0.7, speed: 0.1 + Math.random() * 0.4 });
+    // Starfield
+    const stars: { x: number; y: number; size: number; speed: number; brightness: number }[] = [];
+    for (let i = 0; i < 100; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: Math.random() * 2,
+        speed: Math.random() * 0.5 + 0.1,
+        brightness: Math.random()
+      });
     }
 
-    const spawnEnemy = (isBoss: boolean) => {
-      const maxE = 8 + level * 2;
-      if (enemies.length >= maxE && !isBoss) return;
-      const side = Math.floor(Math.random() * 4);
-      let ex = 0, ey = 0;
-      if (side === 0) { ex = Math.random() * canvas.width; ey = -30; }
-      else if (side === 1) { ex = canvas.width + 30; ey = Math.random() * canvas.height; }
-      else if (side === 2) { ex = Math.random() * canvas.width; ey = canvas.height + 30; }
-      else { ex = -30; ey = Math.random() * canvas.height; }
-      const spd = 0.5 + Math.random() + level * 0.2;
-      const a = Math.atan2(canvas.height / 2 - ey, canvas.width / 2 - ex) + (Math.random() - 0.5) * 0.8;
-      const hp = isBoss ? 8 + level * 2 : 1;
-      enemies.push({ x: ex, y: ey, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, size: isBoss ? 32 : 8 + Math.random() * 10, hp, maxHp: hp, type: isBoss ? 3 : Math.floor(Math.random() * 3), isBoss });
+    // Game state
+    let enemies: any[] = [];
+    let bullets: any[] = [];
+    let score = 0;
+    let combo = 0;
+    let lastKillTime = 0;
+    let highscore = Number(localStorage.getItem('space_shooter_highscore') || 0);
+
+    const spawnEnemy = () => {
+      const size = Math.random() * 20 + 10;
+      enemies.push({
+        x: Math.random() * canvas.width,
+        y: -size,
+        size,
+        speed: Math.random() * 2 + 1,
+        color: `hsl(${Math.random() * 360}, 70%, 60%)`,
+        rotation: 0,
+        rotSpeed: Math.random() * 0.1 - 0.05
+      });
     };
-
-    const explode = (x: number, y: number, count: number, color: string) => {
-      for (let i = 0; i < count; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const s = 1 + Math.random() * 4;
-        particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 35 + Math.random() * 25, color, size: 1.5 + Math.random() * 2.5 });
-      }
-    };
-
-    const addFloat = (x: number, y: number, text: string, color: string) => floatTexts.push({ x, y, text, life: 80, color });
-
-    const shootLaser = () => {
-      const cd = rapidActive > 0 ? 3 : 10;
-      if (time - lastShot < cd) return;
-      lastShot = time;
-      const spd = 10;
-      if (tripleActive > 0) {
-        [-0.2, 0, 0.2].forEach(off => {
-          const ang = ship.angle + off;
-          lasers.push({ x: ship.x + Math.cos(ang) * 18, y: ship.y + Math.sin(ang) * 18, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, life: 70 });
-        });
-      } else {
-        lasers.push({ x: ship.x + Math.cos(ship.angle) * 18, y: ship.y + Math.sin(ship.angle) * 18, vx: Math.cos(ship.angle) * spd, vy: Math.sin(ship.angle) * spd, life: 70 });
-      }
-    };
-
-    const restart = () => {
-      score = 0; lives = 3; level = 1; kills = 0; combo = 0; gameOver = false;
-      enemies.length = 0; lasers.length = 0; particles.length = 0; powerups.length = 0; floatTexts.length = 0;
-      ship.x = canvas.width / 2; ship.y = canvas.height / 2; ship.invincible = 180;
-      bossKillCount = 0; rapidActive = 0; tripleActive = 0; shieldActive = 0;
-    };
-
-    const onClick = () => { if (gameOver) restart(); else shootLaser(); };
-    document.addEventListener("click", onClick);
-
-    const codeSnippets = ["const init = () => {", "await fetch('/api/data');", "git push origin main", "docker compose up -d", "CREATE TABLE users (", "npm run build", "SELECT * FROM logs;"];
-    const codeLines: { x: number; y: number; text: string; alpha: number; speed: number; fs: number }[] = [];
-
-    const resizeHandler = () => { columns = Math.floor(canvas.width / fontSize); drops = new Array(columns).fill(0).map(() => Math.random() * -80); speeds = new Array(columns).fill(0).map(() => 0.3 + Math.random() * 0.7); };
-    window.addEventListener("resize", resizeHandler);
 
     const animate = () => {
-      time++;
-      ctx.fillStyle = "rgba(0, 2, 8, 0.13)";
+      if (!ctx) return;
+      
+      // Clear with slight trail
+      ctx.fillStyle = 'rgba(0, 5, 12, 0.2)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      for (const star of stars) {
-        star.y += star.speed;
-        if (star.y > canvas.height) { star.y = 0; star.x = Math.random() * canvas.width; }
-        const tw = star.brightness * (0.7 + Math.sin(time * 0.05 + star.x) * 0.3);
-        ctx.beginPath(); ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2); ctx.fillStyle = `rgba(200,220,255,${tw})`; ctx.fill();
-      }
+      // Stars
+      ctx.fillStyle = '#fff';
+      stars.forEach(s => {
+        s.y += s.speed;
+        if (s.y > canvas.height) s.y = 0;
+        ctx.globalAlpha = s.brightness;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
 
-      ctx.font = `${fontSize}px 'Courier New', monospace`;
+      // Matrix drops
+      ctx.fillStyle = '#0F0';
+      ctx.font = `${fontSize}px monospace`;
       for (let i = 0; i < drops.length; i++) {
-        if (Math.random() > 0.4) continue;
-        ctx.fillStyle = `rgba(0,255,170,${0.12 + Math.random() * 0.08})`;
-        ctx.fillText(chars[Math.floor(Math.random() * chars.length)], i * fontSize, drops[i] * fontSize);
-        if (drops[i] * fontSize > canvas.height && Math.random() > 0.98) drops[i] = 0;
-        drops[i] += speeds[i];
-      }
-
-      if (Math.random() < 0.015 && codeLines.length < 10) codeLines.push({ x: Math.random() * (canvas.width - 200), y: -20, text: codeSnippets[Math.floor(Math.random() * codeSnippets.length)], alpha: 0.08 + Math.random() * 0.1, speed: 0.2, fs: 11 });
-      for (let i = codeLines.length - 1; i >= 0; i--) {
-        const cl = codeLines[i]; cl.y += cl.speed;
-        if (cl.y > canvas.height + 20) { codeLines.splice(i, 1); continue; }
-        ctx.font = `${cl.fs}px 'Courier New', monospace`; ctx.fillStyle = `rgba(0,180,140,${cl.alpha})`; ctx.fillText(cl.text, cl.x, cl.y);
-      }
-
-      scanY += 0.6; if (scanY > canvas.height) scanY = 0;
-      ctx.fillStyle = "rgba(0,255,120,0.02)"; ctx.fillRect(0, scanY, canvas.width, 2);
-
-      if (gameOver) {
-        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.textAlign = "center";
-        ctx.font = "bold 44px 'Courier New', monospace"; ctx.fillStyle = "rgba(255,50,50,0.9)"; ctx.shadowColor = "red"; ctx.shadowBlur = 20;
-        ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 40); ctx.shadowBlur = 0;
-        ctx.font = "18px 'Courier New', monospace"; ctx.fillStyle = "rgba(0,255,200,0.8)";
-        ctx.fillText(`SCORE: ${score}  |  BEST: ${highScore}  |  LVL: ${level}`, canvas.width / 2, canvas.height / 2 + 10);
-        ctx.font = "13px 'Courier New', monospace"; ctx.fillStyle = "rgba(255,255,255,0.4)";
-        ctx.fillText("[ clique para jogar novamente ]", canvas.width / 2, canvas.height / 2 + 46);
-        ctx.textAlign = "left";
-        animationId = requestAnimationFrame(animate);
-        return;
-      }
-
-      const newLevel = Math.floor(kills / 10) + 1;
-      if (newLevel > level) { level = newLevel; addFloat(canvas.width / 2, canvas.height / 2 - 60, `LEVEL ${level}!`, "rgba(255,220,0,1)"); }
-
-      if (shieldActive > 0) shieldActive--;
-      if (rapidActive > 0) rapidActive--;
-      if (tripleActive > 0) tripleActive--;
-      if (ship.invincible > 0) ship.invincible--;
-      if (comboTimer > 0) comboTimer--; else combo = 0;
-
-      if (mouseX > 0 && mouseY > 0) {
-        ship.x += (mouseX - ship.x) * 0.08; ship.y += (mouseY - ship.y) * 0.08;
-        ship.angle = Math.atan2(mouseY - ship.y, mouseX - ship.x);
-      }
-
-      autoShootTimer++;
-      if (autoShootTimer > (rapidActive > 0 ? 3 : 12) && enemies.length > 0) {
-        autoShootTimer = 0;
-        let nearest = enemies[0]; let minDist = Infinity;
-        for (const e of enemies) { const d = Math.hypot(e.x - ship.x, e.y - ship.y); if (d < minDist) { minDist = d; nearest = e; } }
-        ship.angle = Math.atan2(nearest.y - ship.y, nearest.x - ship.x);
-        shootLaser();
-      }
-
-      if (kills > 0 && kills % 10 === 0 && Math.floor(kills / 10) > bossKillCount) {
-        bossKillCount = Math.floor(kills / 10); spawnEnemy(true);
-        addFloat(canvas.width / 2, canvas.height / 2 - 80, "BOSS INCOMING!", "rgba(255,50,50,1)");
-      }
-
-      const spawnRate = Math.max(20, 60 - level * 5);
-      if (time % spawnRate === 0) spawnEnemy(false);
-      if (time % (spawnRate * 2) === 0 && Math.random() > 0.4) spawnEnemy(false);
-
-      // Powerups
-      for (let i = powerups.length - 1; i >= 0; i--) {
-        const p = powerups[i]; p.life--;
-        if (p.life <= 0) { powerups.splice(i, 1); continue; }
-        const pcols = ["rgba(0,150,255,", "rgba(255,200,0,", "rgba(180,0,255,"];
-        const plabels = ["S", "R", "T"];
-        ctx.beginPath(); ctx.arc(p.x, p.y, 10 + Math.sin(time * 0.1 + i) * 2, 0, Math.PI * 2);
-        ctx.fillStyle = `${pcols[p.ptype]}0.15)`; ctx.strokeStyle = `${pcols[p.ptype]}0.9)`; ctx.lineWidth = 2;
-        ctx.shadowColor = `${pcols[p.ptype]}0.8)`; ctx.shadowBlur = 12; ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
-        ctx.font = "bold 11px 'Courier New'"; ctx.textAlign = "center"; ctx.fillStyle = `${pcols[p.ptype]}0.95)`; ctx.fillText(plabels[p.ptype], p.x, p.y + 4); ctx.textAlign = "left";
-        if (Math.hypot(p.x - ship.x, p.y - ship.y) < 24) {
-          if (p.ptype === 0) { shieldActive = 300; addFloat(ship.x, ship.y - 30, "SHIELD!", "rgba(0,150,255,1)"); }
-          else if (p.ptype === 1) { rapidActive = 300; addFloat(ship.x, ship.y - 30, "RAPID FIRE!", "rgba(255,200,0,1)"); }
-          else { tripleActive = 300; addFloat(ship.x, ship.y - 30, "TRIPLE SHOT!", "rgba(180,0,255,1)"); }
-          powerups.splice(i, 1);
+        const text = characters.charAt(Math.floor(Math.random() * characters.length));
+        ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+        if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+          drops[i] = 0;
         }
+        drops[i]++;
       }
 
-      // Lasers
-      for (let i = lasers.length - 1; i >= 0; i--) {
-        const l = lasers[i]; l.x += l.vx; l.y += l.vy; l.life--;
-        if (l.life <= 0 || l.x < -20 || l.x > canvas.width + 20 || l.y < -20 || l.y > canvas.height + 20) { lasers.splice(i, 1); continue; }
-        const lc = tripleActive > 0 ? "rgba(180,0,255," : "rgba(0,255,255,";
-        ctx.beginPath(); ctx.moveTo(l.x, l.y); ctx.lineTo(l.x - l.vx * 2.5, l.y - l.vy * 2.5);
-        ctx.strokeStyle = `${lc}${0.8 * (l.life / 70)})`; ctx.shadowColor = `${lc}0.8)`; ctx.shadowBlur = 8; ctx.lineWidth = 2; ctx.stroke(); ctx.shadowBlur = 0;
-        for (let j = enemies.length - 1; j >= 0; j--) {
-          const e = enemies[j];
-          if (Math.hypot(l.x - e.x, l.y - e.y) < e.size + 4) {
-            e.hp--; lasers.splice(i, 1);
-            if (e.hp <= 0) {
-              const ecols = ["rgba(255,200,50,1)", "rgba(255,100,30,1)", "rgba(0,255,200,1)", "rgba(255,50,50,1)"];
-              explode(e.x, e.y, e.isBoss ? 40 : 15, ecols[e.type]);
-              if (Math.random() > 0.7) powerups.push({ x: e.x, y: e.y, ptype: Math.floor(Math.random() * 3), life: 280 });
-              combo++; comboTimer = 120;
-              const pts = e.isBoss ? 20 * level : combo > 2 ? combo : 1;
-              score += pts; kills++;
-              if (score > highScore) { highScore = score; localStorage.setItem('game_highscore', String(highScore)); }
-              addFloat(e.x, e.y - 20, combo > 2 ? `${pts}pts COMBO x${combo}!` : `+${pts}`, combo > 2 ? "rgba(255,220,0,1)" : "rgba(0,255,200,0.8)");
-              enemies.splice(j, 1);
-            }
-            break;
-          }
-        }
-      }
+      // Ship
+      const ship = shipRef.current;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = '#00f6ff';
+      ctx.fillStyle = '#00f6ff';
+      ctx.beginPath();
+      ctx.moveTo(ship.x, ship.y - 15);
+      ctx.lineTo(ship.x - 12, ship.y + 12);
+      ctx.lineTo(ship.x + 12, ship.y + 12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Bullets
+      bullets = bullets.filter(b => b.y > 0);
+      bullets.forEach(b => {
+        b.y -= 8;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(b.x - 2, b.y - 8, 4, 16);
+      });
 
       // Enemies
-      for (let i = enemies.length - 1; i >= 0; i--) {
-        const e = enemies[i]; e.x += e.vx; e.y += e.vy;
-        if (!e.isBoss && (e.x < -80 || e.x > canvas.width + 80 || e.y < -80 || e.y > canvas.height + 80)) { enemies.splice(i, 1); continue; }
-
-        ctx.save(); ctx.translate(e.x, e.y);
-        const pulse = Math.sin(time * 0.1 + e.x) * 0.2;
-        if (e.isBoss) {
-          ctx.rotate(time * 0.01);
-          ctx.beginPath();
-          for (let s = 0; s < 10; s++) { const a = (s / 10) * Math.PI * 2; const r = s % 2 === 0 ? e.size : e.size * 0.5; if (s === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r); else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
-          ctx.closePath(); ctx.fillStyle = `rgba(255,30,30,${0.7 + pulse})`; ctx.shadowColor = "rgba(255,50,0,0.8)"; ctx.shadowBlur = 20; ctx.fill(); ctx.shadowBlur = 0;
-          const bw = e.size * 3; const bx2 = -bw / 2; const by2 = -e.size - 14;
-          ctx.fillStyle = "rgba(100,0,0,0.5)"; ctx.fillRect(bx2, by2, bw, 6);
-          ctx.fillStyle = "rgba(255,50,0,0.9)"; ctx.fillRect(bx2, by2, bw * (e.hp / e.maxHp), 6);
-          ctx.strokeStyle = "rgba(255,100,0,0.6)"; ctx.lineWidth = 1; ctx.strokeRect(bx2, by2, bw, 6);
-        } else if (e.type === 0) {
-          ctx.beginPath();
-          for (let s = 0; s < 8; s++) { const a = (s / 8) * Math.PI * 2; const r = e.size * (0.7 + Math.sin(a * 3 + e.x) * 0.3); if (s === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r); else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
-          ctx.closePath(); ctx.fillStyle = `rgba(180,80,60,${0.6 + pulse})`; ctx.strokeStyle = `rgba(255,120,80,${0.7 + pulse})`; ctx.lineWidth = 1; ctx.fill(); ctx.stroke();
-        } else if (e.type === 1) {
-          ctx.rotate(time * 0.02 + e.y); ctx.beginPath(); ctx.moveTo(0, -e.size); ctx.lineTo(e.size * 0.7, e.size * 0.5); ctx.lineTo(-e.size * 0.7, e.size * 0.5); ctx.closePath();
-          ctx.fillStyle = `rgba(255,50,80,${0.6 + pulse})`; ctx.shadowColor = "rgba(255,50,80,0.6)"; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0;
-        } else if (!e.isBoss) {
-          ctx.rotate(time * 0.03); ctx.beginPath(); ctx.moveTo(0, -e.size); ctx.lineTo(e.size * 0.6, 0); ctx.lineTo(0, e.size); ctx.lineTo(-e.size * 0.6, 0); ctx.closePath();
-          ctx.fillStyle = `rgba(200,0,255,${0.5 + pulse})`; ctx.shadowColor = "rgba(200,0,255,0.6)"; ctx.shadowBlur = 10; ctx.fill(); ctx.shadowBlur = 0;
-        }
+      enemies = enemies.filter(e => e.y < canvas.height + 50);
+      enemies.forEach((e, idx) => {
+        e.y += e.speed;
+        e.rotation += e.rotSpeed;
+        
+        ctx.save();
+        ctx.translate(e.x, e.y);
+        ctx.rotate(e.rotation);
+        ctx.strokeStyle = e.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-e.size/2, -e.size/2, e.size, e.size);
         ctx.restore();
 
-        if (ship.invincible <= 0 && Math.hypot(e.x - ship.x, e.y - ship.y) < e.size + 16) {
-          if (shieldActive > 0) {
-            shieldActive = 0; explode(e.x, e.y, 20, "rgba(0,150,255,1)");
-            if (!e.isBoss) enemies.splice(i, 1);
-            addFloat(ship.x, ship.y - 40, "SHIELD BLOCKED!", "rgba(0,150,255,1)");
-          } else {
-            explode(ship.x, ship.y, 20, "rgba(255,100,0,1)"); lives--; ship.invincible = 180; combo = 0;
-            addFloat(ship.x, ship.y - 40, lives > 0 ? `VIDA -1 (${lives} left)` : "MORREU!", "rgba(255,80,80,1)");
-            if (!e.isBoss) enemies.splice(i, 1);
-            if (lives <= 0) { gameOver = true; if (score > highScore) { highScore = score; localStorage.setItem('game_highscore', String(highScore)); } }
+        // Collision
+        bullets.forEach((b, bIdx) => {
+          const dist = Math.hypot(b.x - e.x, b.y - e.y);
+          if (dist < e.size) {
+            enemies.splice(idx, 1);
+            bullets.splice(bIdx, 1);
+            score += 10;
+            combo++;
+            lastKillTime = Date.now();
+            if (score > highscore) {
+              highscore = score;
+              localStorage.setItem('space_shooter_highscore', String(highscore));
+            }
           }
-        }
-      }
+        });
+      });
 
-      // Particles
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vx *= 0.96; p.vy *= 0.96; p.life--;
-        if (p.life <= 0) { particles.splice(i, 1); continue; }
-        const al = p.life / 50;
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.size * al, 0, Math.PI * 2);
-        ctx.fillStyle = p.color.replace("1)", `${al})`); ctx.shadowColor = p.color; ctx.shadowBlur = 4; ctx.fill(); ctx.shadowBlur = 0;
-      }
-
-      // Float texts
-      for (let i = floatTexts.length - 1; i >= 0; i--) {
-        const ft = floatTexts[i]; ft.life--; ft.y -= 0.6;
-        if (ft.life <= 0) { floatTexts.splice(i, 1); continue; }
-        ctx.font = "bold 13px 'Courier New', monospace"; ctx.textAlign = "center";
-        ctx.fillStyle = ft.color.replace("1)", `${ft.life / 80})`); ctx.fillText(ft.text, ft.x, ft.y); ctx.textAlign = "left";
-      }
-
-      // Draw ship
-      if (!(ship.invincible > 0 && Math.floor(time / 4) % 2 === 0)) {
-        ctx.save(); ctx.translate(ship.x, ship.y); ctx.rotate(ship.angle);
-        ship.thrustAlpha = 0.5 + Math.sin(time * 0.3) * 0.3;
-        const eg = ctx.createRadialGradient(-12, 0, 0, -12, 0, 20); eg.addColorStop(0, `rgba(0,200,255,${ship.thrustAlpha * 0.6})`); eg.addColorStop(1, "transparent");
-        ctx.fillStyle = eg; ctx.fillRect(-32, -20, 20, 40);
-        ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-12, -10); ctx.lineTo(-8, 0); ctx.lineTo(-12, 10); ctx.closePath();
-        ctx.fillStyle = "rgba(0,255,200,0.85)"; ctx.shadowColor = "rgba(0,255,200,0.7)"; ctx.shadowBlur = 18; ctx.fill();
-        ctx.strokeStyle = "rgba(0,255,255,0.9)"; ctx.lineWidth = 1; ctx.stroke(); ctx.shadowBlur = 0;
-        ctx.beginPath(); ctx.arc(6, 0, 3, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fill();
-        if (shieldActive > 0) {
-          ctx.beginPath(); ctx.arc(0, 0, 30 + Math.sin(time * 0.1) * 3, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(0,150,255,${0.5 + Math.sin(time * 0.1) * 0.3})`; ctx.lineWidth = 2; ctx.shadowColor = "rgba(0,150,255,0.8)"; ctx.shadowBlur = 10; ctx.stroke(); ctx.shadowBlur = 0;
-        }
-        ctx.restore();
-      }
-
-      // Aim crosshair
-      if (mouseX > 0 && mouseY > 0) {
-        ctx.strokeStyle = "rgba(0,255,200,0.12)"; ctx.lineWidth = 0.5;
-        ctx.beginPath(); ctx.arc(mouseX, mouseY, 18, 0, Math.PI * 2); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(mouseX - 7, mouseY); ctx.lineTo(mouseX + 7, mouseY); ctx.moveTo(mouseX, mouseY - 7); ctx.lineTo(mouseX, mouseY + 7); ctx.stroke();
-      }
+      if (Math.random() < 0.05) spawnEnemy();
+      if (Date.now() - lastKillTime > 2000) combo = 0;
 
       // HUD
-      ctx.font = "bold 12px 'Courier New', monospace"; ctx.fillStyle = "rgba(0,255,200,0.6)";
-      ctx.fillText(`SCORE: ${String(score).padStart(5, '0')}`, 14, 26);
-      ctx.fillText(`BEST:  ${String(highScore).padStart(5, '0')}`, 14, 44);
-      ctx.fillText(`LVL:${level}  KILLS:${kills}`, 14, 62);
-      if (combo > 2) { ctx.fillStyle = "rgba(255,220,0,0.9)"; ctx.font = "bold 14px 'Courier New'"; ctx.fillText(`COMBO x${combo}!`, 14, 80); }
-      ctx.font = "15px serif";
-      for (let h = 0; h < 3; h++) { ctx.fillStyle = h < lives ? "rgba(255,60,60,0.9)" : "rgba(60,60,60,0.4)"; ctx.fillText("♥", 14 + h * 22, 100); }
-      let pi = 0;
-      if (shieldActive > 0) { ctx.fillStyle = "rgba(0,150,255,0.8)"; ctx.font = "10px 'Courier New'"; ctx.fillText(`[S] ${Math.ceil(shieldActive / 60)}s`, 14, 118 + pi++ * 16); }
-      if (rapidActive > 0) { ctx.fillStyle = "rgba(255,200,0,0.8)"; ctx.font = "10px 'Courier New'"; ctx.fillText(`[R] ${Math.ceil(rapidActive / 60)}s`, 14, 118 + pi++ * 16); }
-      if (tripleActive > 0) { ctx.fillStyle = "rgba(180,0,255,0.8)"; ctx.font = "10px 'Courier New'"; ctx.fillText(`[T] ${Math.ceil(tripleActive / 60)}s`, 14, 118 + pi++ * 16); }
+      ctx.fillStyle = '#00f6ff';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(`SCORE: ${score.toString().padStart(5, '0')}`, 20, 30);
+      ctx.fillText(`BEST: ${highscore.toString().padStart(5, '0')}`, 20, 50);
+      if (combo > 1) {
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillText(`COMBO x${combo}!`, 20, 70);
+      }
 
       animationId = requestAnimationFrame(animate);
     };
 
-    ctx.fillStyle = "rgb(0, 2, 8)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const handleMouseMove = (e: MouseEvent) => { shipRef.current = { x: e.clientX, y: e.clientY }; };
+    const handleClick = () => { bullets.push({ x: shipRef.current.x, y: shipRef.current.y }); };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("click", handleClick);
+    
     animate();
 
     return () => {
       cancelAnimationFrame(animationId);
       window.removeEventListener("resize", resize);
-      window.removeEventListener("resize", resizeHandler);
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseleave", onMouseLeave);
-      document.removeEventListener("touchmove", onTouchMove);
-      document.removeEventListener("touchend", onTouchEnd);
-      document.removeEventListener("click", onClick);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("click", handleClick);
     };
   }, []);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      className="fixed inset-0 w-full h-full"
-      style={{ background: "rgb(0, 2, 8)" }}
-    />
-  );
+  return <canvas ref={canvasRef} className="fixed inset-0 w-full h-full" />;
 };
-
-
 
 const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -396,7 +205,6 @@ const Login = () => {
   const navigate = useNavigate();
   const { isAppUpToDate: isUpToDate, lastUpdated, isSyncing, refreshApp } = useAppVersion(APP_VERSION, BUILD_TIMESTAMP);
 
-  // Dark mode toggle
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add('dark');
@@ -407,7 +215,6 @@ const Login = () => {
     }
   }, [isDark]);
 
-  // Clock
   useEffect(() => {
     const timer = setInterval(() => setCurrentDateTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -460,19 +267,23 @@ const Login = () => {
     <div className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden">
       <MatrixBackground />
 
-      {/* Content */}
       <div className="relative z-10 w-full flex flex-col items-center px-3 sm:px-4 py-4 gap-3 sm:gap-4 max-w-md mx-auto">
-        {/* Date/Time Header */}
         <div className="w-full text-center text-white">
           <p className="text-lg sm:text-xl font-bold tracking-wide font-mono">
             DATA: {currentDateTime.toLocaleDateString('pt-BR')}, {currentDateTime.toLocaleTimeString('pt-BR')}
           </p>
         </div>
 
-        {/* Version & Sync Bar */}
+        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/80 text-white text-[10px] font-bold shadow-sm animate-pulse-slow">
+          <Badge variant="outline" className="text-[9px] border-white/20 text-white font-mono bg-white/5 h-4 px-1">v3.0.0</Badge>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            ✓ ATUALIZADO
+          </span>
+        </div>
+
         <div className="w-full flex flex-wrap items-center justify-between rounded-xl bg-white/5 backdrop-blur-md border border-white/10 px-3 sm:px-4 py-2 text-white text-xs gap-2">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[10px] sm:text-xs opacity-70">v{APP_VERSION}</span>
             {lastUpdated && (
               <span className="text-[10px] sm:text-xs opacity-50">
                 • Atualizado: {new Date(lastUpdated).toLocaleDateString('pt-BR')} {new Date(lastUpdated).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
